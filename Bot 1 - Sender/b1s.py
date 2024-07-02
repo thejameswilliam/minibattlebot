@@ -17,7 +17,7 @@ e = espnow.ESPNow()
 e.active(True)
 
 # Replace with the receiver's MAC address
-receiver_mac = b'\x08\xd1\xf9\xdd\x9d\xb0'  # Ensure this is correctly formatted
+receiver_mac = b'\x08\xd1\xf9\xee_p'  # Ensure this is correctly formatted
 e.add_peer(receiver_mac)
 
 # Joystick switches setup

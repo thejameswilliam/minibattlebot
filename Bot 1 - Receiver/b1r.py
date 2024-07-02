@@ -19,6 +19,7 @@ print("MAC address:", sta.config('mac'))
 e = espnow.ESPNow()
 e.active(True)
 
+# Replace with the sender's MAC address
 peer_mac = b'\x08\xd1\xf9\xddR|'  # Replace with the sender's MAC address
 e.add_peer(peer_mac)
 
@@ -63,11 +64,11 @@ def process_command(command):
         motor1_backward()
         motor2_backward()
     elif command == b'left':
-        motor2_backward()
-        motor1_forward()
-    elif command == b'right':
-        motor2_forward()
         motor1_backward()
+        motor2_forward()
+    elif command == b'right':
+        motor1_forward()
+        motor2_backward()
     elif command == b'stop':
         motor1_stop()
         motor2_stop()
