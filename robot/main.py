@@ -29,10 +29,8 @@ Safety features:
 Pin assignments — change these constants to match your wiring:
     Motor A IN1 : GPIO2  (D0)
     Motor A IN2 : GPIO3  (D1)
-    Motor A PWM : GPIO4  (D2)
     Motor B IN1 : GPIO5  (D3)
     Motor B IN2 : GPIO6  (D4)
-    Motor B PWM : GPIO7  (D5)
     Pair LED    : GPIO10 (D10)
     BOOT button : GPIO9  (D9, built-in on XIAO ESP32-C3, active LOW)
 
@@ -63,11 +61,9 @@ from glib import gspnow
 # ---------------------------------------------------------------------------
 MOTOR_A_IN1     = 2   # D0
 MOTOR_A_IN2     = 3   # D1
-MOTOR_A_PWM     = 4   # D2
 
 MOTOR_B_IN1     = 5   # D3
 MOTOR_B_IN2     = 6   # D4
-MOTOR_B_PWM     = 7   # D5
 
 PAIR_LED_PIN    = 10  # D10 — blinks while pairing, solid when connected, off on signal loss
 BOOT_BUTTON_PIN = 9   # D9 — built-in BOOT button on XIAO ESP32-C3, active LOW
@@ -163,8 +159,8 @@ def run_pairing_mode(pair_led):
 # ---------------------------------------------------------------------------
 # Hardware setup
 # ---------------------------------------------------------------------------
-motor_a     = Motor(MOTOR_A_IN1, MOTOR_A_IN2, MOTOR_A_PWM)
-motor_b     = Motor(MOTOR_B_IN1, MOTOR_B_IN2, MOTOR_B_PWM)
+motor_a     = Motor(MOTOR_A_IN1, MOTOR_A_IN2)
+motor_b     = Motor(MOTOR_B_IN1, MOTOR_B_IN2)
 pair_led    = Pin(PAIR_LED_PIN, Pin.OUT, value=0)
 boot_button = Pin(BOOT_BUTTON_PIN, Pin.IN, Pin.PULL_UP)
 

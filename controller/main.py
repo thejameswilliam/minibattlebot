@@ -1,8 +1,11 @@
 """
 Battle Bot — Controller (Sender)
 ==================================
-Reads a two-axis joystick and sends motor commands to the paired robot
-over ESP-NOW (Espressif's peer-to-peer Wi-Fi protocol, no router needed).
+Reads a 4-direction switch joystick (COM/Ground + X+/X-/Y+/Y- momentary
+switches, no proportional/analog output) and sends motor commands to the
+paired robot over ESP-NOW (Espressif's peer-to-peer Wi-Fi protocol, no
+router needed).  Since the joystick is on/off per direction, each axis is
+sent to the robot at full speed (±100) or 0 — there is no in-between.
 
 How to use:
     1. Flash this file (plus the glib/ folder) to the controller ESP32.
@@ -20,29 +23,40 @@ Pairing:
 
 LED wiring (external components, both LEDs use a 220Ω series resistor):
     Power LED  — anode → 3.3V pin, cathode → GND (always on, no GPIO needed)
-    Pair LED   — anode → GPIO10 (D10), cathode → GND
+    Pair LED   — anode → GPIO18, cathode → GND
 
 Commands sent to the robot:
     {'x': int, 'y': int}
-      x: -100 to 100 — turning  (left = negative, right = positive)
-      y: -100 to 100 — throttle (back = negative, forward = positive)
+      x: -100, 0, or 100 — turning  (left = -100, right = 100)
+      y: -100, 0, or 100 — throttle (back = -100, forward = 100)
+
+Joystick wiring: this is a 4-direction switch joystick, not a potentiometer.
+Ground is common; each of X+/X-/Y+/Y- is a momentary switch that connects to
+Ground when the stick is pushed that direction.  Wire each switch pin to its
+GPIO with the chip's internal pull-up enabled (done in code below) — no
+external resistors needed.  Pushing a direction pulls that pin LOW.
 
 Pin assignments — change these constants to match your wiring:
-    Joystick X axis : GPIO2  (D0 / A0) — must be ADC1 pin
-    Joystick Y axis : GPIO3  (D1 / A1) — must be ADC1 pin
-    Pair LED        : GPIO10 (D10)
-    BOOT button     : GPIO9  (D9, built-in on XIAO ESP32-C3, active LOW)
+    Joystick X+ (right) : GPIO32
+    Joystick X- (left)  : GPIO33
+    Joystick Y+ (fwd)   : GPIO25
+    Joystick Y- (back)  : GPIO26
+    Pair LED            : GPIO18
+    BOOT button         : GPIO0  (built-in BOOT button on ESP32-WROOM-32 dev
+                                  boards, no external wiring needed, active LOW)
 
-Note on GPIO9 (BOOT button): this pin is also a boot-mode strapping pin on
-the ESP32-C3.  Holding it LOW *during power-on* drops the chip straight into
-the ROM UART bootloader instead of running this script — so pairing can only
-be triggered by pressing BOOT shortly *after* boot completes, never by
+Note on pin choice: GPIO6-11 are wired to the module's internal SPI flash on
+ESP32-WROOM-32 and are not usable.  GPIO1/GPIO3 are UART0 TX/RX, used for
+flashing and the REPL — avoid them for GPIO duty.  GPIO34-39 are input-only
+and have no internal pull-up, so they're unsuitable for these switches
+without an external pull-up resistor — GPIO32/33/25/26 were chosen instead
+since they support internal pull-ups.
+
+Note on GPIO0 (BOOT button): this pin is also a boot-mode strapping pin on
+the ESP32.  Holding it LOW *during power-on/reset* drops the chip straight
+into the ROM UART bootloader instead of running this script — so pairing can
+only be triggered by pressing BOOT shortly *after* boot completes, never by
 holding it while powering on.  See run_pairing_mode() below.
-
-Note on GPIO20/21 (D7/D6): these are U0RXD/U0TXD, wired to the onboard
-USB-serial bridge used for flashing and the REPL.  Avoid using them as
-general-purpose GPIO (e.g. for an LED) — driving GPIO20 will contend with
-the bridge chip's TX line whenever USB is connected.
 """
 
 import json
@@ -50,30 +64,27 @@ import time
 import espnow
 import network
 import machine
-from machine import ADC, Pin, WDT
+from machine import Pin, WDT
 
 from glib import gspnow
 
 # ---------------------------------------------------------------------------
 # Pin assignments
 # ---------------------------------------------------------------------------
-JOYSTICK_X_PIN  = 2   # D0 / A0 — ADC1 channel, safe to use with Wi-Fi active
-JOYSTICK_Y_PIN  = 3   # D1 / A1 — ADC1 channel, safe to use with Wi-Fi active
-PAIR_LED_PIN    = 10  # D10 — blinks while pairing, solid once paired
-BOOT_BUTTON_PIN = 9   # D9 — built-in BOOT button on XIAO ESP32-C3, active LOW
+JOYSTICK_X_PLUS_PIN  = 32  # right — momentary switch to Ground
+JOYSTICK_X_MINUS_PIN = 33  # left  — momentary switch to Ground
+JOYSTICK_Y_PLUS_PIN  = 25  # forward — momentary switch to Ground
+JOYSTICK_Y_MINUS_PIN = 26  # back    — momentary switch to Ground
+PAIR_LED_PIN         = 18  # blinks while pairing, solid once paired
+BOOT_BUTTON_PIN      = 0   # built-in BOOT button on ESP32-WROOM-32, active LOW
 
 # ---------------------------------------------------------------------------
 # Tuning constants
 # ---------------------------------------------------------------------------
-# How long after boot to watch BOOT for a re-pair request.  GPIO9 is a boot
+# How long after boot to watch BOOT for a re-pair request.  GPIO0 is a boot
 # strapping pin, so it can only be sampled as a button *after* the chip has
 # already finished booting into this script — not while power is applied.
 REPAIR_WINDOW_MS = 3000
-
-# Joystick center reads ~2048 on a 0-4095 ADC range.
-# Any reading within DEADZONE_PCT of center is treated as zero.
-# Raise this if the robot drifts when the stick is at rest.
-DEADZONE_PCT = 8
 
 # How often to send a command packet to the robot.
 # 50 ms = 20 packets per second — snappy response without flooding the radio.
@@ -163,17 +174,17 @@ def run_pairing_mode(pair_led):
 # ---------------------------------------------------------------------------
 # Hardware setup
 # ---------------------------------------------------------------------------
-pair_led    = Pin(PAIR_LED_PIN, Pin.OUT, value=0)
-boot_button = Pin(BOOT_BUTTON_PIN, Pin.IN, Pin.PULL_UP)
-joystick_x  = ADC(Pin(JOYSTICK_X_PIN))
-joystick_y  = ADC(Pin(JOYSTICK_Y_PIN))
-joystick_x.atten(ADC.ATTN_11DB)  # full 0–3.3 V range → 0–4095 ADC counts
-joystick_y.atten(ADC.ATTN_11DB)
+pair_led     = Pin(PAIR_LED_PIN, Pin.OUT, value=0)
+boot_button  = Pin(BOOT_BUTTON_PIN, Pin.IN, Pin.PULL_UP)
+joystick_xp  = Pin(JOYSTICK_X_PLUS_PIN, Pin.IN, Pin.PULL_UP)
+joystick_xm  = Pin(JOYSTICK_X_MINUS_PIN, Pin.IN, Pin.PULL_UP)
+joystick_yp  = Pin(JOYSTICK_Y_PLUS_PIN, Pin.IN, Pin.PULL_UP)
+joystick_ym  = Pin(JOYSTICK_Y_MINUS_PIN, Pin.IN, Pin.PULL_UP)
 
 # ---------------------------------------------------------------------------
 # Pairing check — runs once at boot
 #
-# GPIO9 (BOOT) is a boot-mode strapping pin, so it can't be held during
+# GPIO0 (BOOT) is a boot-mode strapping pin, so it can't be held during
 # power-on to request pairing — that drops the chip into the ROM bootloader
 # instead of running this script.  Instead, watch it for a few seconds after
 # boot has already completed.
@@ -216,27 +227,21 @@ wdt = WDT(timeout=5000)
 
 def read_joystick():
     """
-    Return (x, y) joystick position as percentages (-100 to 100).
-
-    Raw ADC reads 0–4095; resting center is ~2048.  Values within the
-    deadzone are clamped to 0 to prevent motor drift at rest.
+    Return (x, y) as -100, 0, or 100 based on which direction switches are
+    pressed.  Switches are active LOW (pressed pulls the pin to Ground).
+    If both switches on an axis are pressed at once, they cancel to 0.
     """
-    raw_x = joystick_x.read()
-    raw_y = joystick_y.read()
+    x = 0
+    if joystick_xp.value() == 0:
+        x += 100
+    if joystick_xm.value() == 0:
+        x -= 100
 
-    # Map 0–4095 → -100 to 100 (center 2048 → 0)
-    x = int((raw_x - 2048) / 2048 * 100)
-    y = int((raw_y - 2048) / 2048 * 100)
-
-    # Clamp to ±100 in case the ADC reads slightly outside expected range
-    x = max(-100, min(100, x))
-    y = max(-100, min(100, y))
-
-    # Apply center deadzone
-    if abs(x) < DEADZONE_PCT:
-        x = 0
-    if abs(y) < DEADZONE_PCT:
-        y = 0
+    y = 0
+    if joystick_yp.value() == 0:
+        y += 100
+    if joystick_ym.value() == 0:
+        y -= 100
 
     return x, y
 
