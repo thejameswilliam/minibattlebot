@@ -34,7 +34,7 @@ Both boards are **Seeed XIAO ESP32-C3**.
 |-----------|----------|------|
 | Joystick X axis | D0 / A0 | GPIO2 |
 | Joystick Y axis | D1 / A1 | GPIO3 |
-| Pair LED (220Ω to GND) | D7 | GPIO20 |
+| Pair LED (220Ω to GND) | D10 | GPIO10 |
 | Power LED (220Ω to GND) | 3V3 pin | — hardwired, no GPIO |
 | BOOT button (built-in) | D9 | GPIO9 |
 
@@ -47,7 +47,7 @@ Both boards are **Seeed XIAO ESP32-C3**.
 | Motor B IN1 | D3 | GPIO5 |
 | Motor B IN2 | D4 | GPIO6 |
 | Motor B PWM | D5 | GPIO7 |
-| Pair LED (220Ω to GND) | D7 | GPIO20 |
+| Pair LED (220Ω to GND) | D10 | GPIO10 |
 | Power LED (220Ω to GND) | 3V3 pin | — hardwired, no GPIO |
 | BOOT button (built-in) | D9 | GPIO9 |
 
@@ -59,7 +59,7 @@ Both boards use the same two-LED setup:
 
 ```
 Power LED:  3V3 pin ──[220Ω]──[LED anode → cathode]── GND
-Pair LED:   GPIO20  ──[220Ω]──[LED anode → cathode]── GND
+Pair LED:   GPIO10  ──[220Ω]──[LED anode → cathode]── GND
 ```
 
 The power LED is always on whenever the board has power — no code involved.
@@ -76,6 +76,14 @@ The pair LED is software-controlled (see LED behavior below).
 > **Note on ADC:** GPIO2 and GPIO3 are both ADC1 channels, which remain accurate
 > while ESP-NOW / Wi-Fi is active.  Do not use GPIO5 (D3/A3) for ADC — it shares
 > ADC2 with the Wi-Fi radio and gives unreliable readings when wireless is on.
+>
+> **Note on GPIO9 (BOOT):** this is a boot-mode strapping pin on the ESP32-C3
+> — holding it LOW during power-on drops the chip into the ROM bootloader
+> instead of running MicroPython, so it can only be read as a button *after*
+> boot completes (see Pairing below), never held while powering on.
+>
+> **Note on GPIO20/21 (D7/D6):** these are the onboard USB-serial UART pins
+> (U0RXD/U0TXD) used for flashing and the REPL. Avoid wiring anything to them.
 
 ---
 
@@ -107,22 +115,27 @@ ls /dev/tty.*
 Pairing is required once when you first set up a pair, and again any time
 you swap a broken robot for a replacement.  No laptop or reflashing needed.
 
-1. **Robot first:** hold the BOOT button on the robot while powering it on.
-   The robot will print its MAC and start advertising.
+1. **Robot first:** power on the robot and press its BOOT button within
+   3 seconds of boot.  The robot will print its MAC and start advertising.
 
-2. **Controller second:** hold the BOOT button on the controller while
-   powering it on.  The controller will scan for any advertising robot.
+2. **Controller second:** power on the controller and press its BOOT button
+   within 3 seconds of boot.  The controller will scan for any advertising
+   robot.
 
 3. When found, both devices print a confirmation, save the pairing to their
-   flash storage, and reboot.  The BOOT button does not need to be held any
-   longer after the initial power-on.
+   flash storage, and reboot.
 
 4. On all future power-ons, both devices load the saved pairing and connect
    automatically — no BOOT button needed.
 
-**To swap a broken robot:** power off the controller, put the replacement
-robot in pairing mode (BOOT at power-on), then put the controller in pairing
-mode (BOOT at power-on).  Done in about 10 seconds.
+> GPIO9 (BOOT) is a boot-mode strapping pin on the ESP32-C3: holding it down
+> *while power is applied* drops the chip into the ROM bootloader instead of
+> running MicroPython at all. That's why pairing is triggered by a press
+> shortly *after* boot, not by holding the button during power-on.
+
+**To swap a broken robot:** power off the controller, power on the
+replacement robot and press BOOT within 3 seconds, then power on the
+controller and press BOOT within 3 seconds.  Done in about 10 seconds.
 
 ---
 

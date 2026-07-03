@@ -8,8 +8,9 @@ How to use:
     1. Flash this file, motors.py, and the glib/ folder to the robot ESP32.
     2. On first power-on, pairing mode starts automatically because there is
        no saved controller address yet.
-    3. To re-pair (e.g. swapping to a replacement robot): hold BOOT on this
-       robot at power-on, then hold BOOT on the controller at power-on.
+    3. To re-pair (e.g. swapping to a replacement robot): power on this robot
+       and press its BOOT button within 3 seconds, then power on the
+       controller and press its BOOT button within 3 seconds.
 
 Pairing:
     - Pair LED blinks while broadcasting and waiting for the controller.
@@ -18,7 +19,7 @@ Pairing:
 
 LED wiring (external components, both LEDs use a 220Ω series resistor):
     Power LED  — anode → 3.3V pin, cathode → GND (always on, no GPIO needed)
-    Pair LED   — anode → GPIO20 (D7), cathode → GND
+    Pair LED   — anode → GPIO10 (D10), cathode → GND
 
 Safety features:
     - Motors stop within 200 ms if no command is received.
@@ -32,8 +33,19 @@ Pin assignments — change these constants to match your wiring:
     Motor B IN1 : GPIO5  (D3)
     Motor B IN2 : GPIO6  (D4)
     Motor B PWM : GPIO7  (D5)
-    Pair LED    : GPIO20 (D7)
+    Pair LED    : GPIO10 (D10)
     BOOT button : GPIO9  (D9, built-in on XIAO ESP32-C3, active LOW)
+
+Note on GPIO9 (BOOT button): this pin is also a boot-mode strapping pin on
+the ESP32-C3.  Holding it LOW *during power-on* drops the chip straight into
+the ROM UART bootloader instead of running this script — so pairing can only
+be triggered by pressing BOOT shortly *after* boot completes, never by
+holding it while powering on.  See run_pairing_mode() below.
+
+Note on GPIO20/21 (D7/D6): these are U0RXD/U0TXD, wired to the onboard
+USB-serial bridge used for flashing and the REPL.  Avoid using them as
+general-purpose GPIO (e.g. for an LED) — driving GPIO20 will contend with
+the bridge chip's TX line whenever USB is connected.
 """
 
 import json
@@ -57,7 +69,7 @@ MOTOR_B_IN1     = 5   # D3
 MOTOR_B_IN2     = 6   # D4
 MOTOR_B_PWM     = 7   # D5
 
-PAIR_LED_PIN    = 20  # D7 — blinks while pairing, solid when connected, off on signal loss
+PAIR_LED_PIN    = 10  # D10 — blinks while pairing, solid when connected, off on signal loss
 BOOT_BUTTON_PIN = 9   # D9 — built-in BOOT button on XIAO ESP32-C3, active LOW
 
 # ---------------------------------------------------------------------------
@@ -67,6 +79,11 @@ BOOT_BUTTON_PIN = 9   # D9 — built-in BOOT button on XIAO ESP32-C3, active LOW
 # 200 ms is long enough to survive brief interference but short enough
 # to halt the robot quickly if the controller is switched off.
 COMMAND_TIMEOUT_MS = 200
+
+# How long after boot to watch BOOT for a re-pair request.  GPIO9 is a boot
+# strapping pin, so it can only be sampled as a button *after* the chip has
+# already finished booting into this script — not while power is applied.
+REPAIR_WINDOW_MS = 3000
 
 # ---------------------------------------------------------------------------
 # Config helpers — load/save the paired controller's MAC from flash
@@ -160,10 +177,29 @@ def stop_all_motors():
 
 # ---------------------------------------------------------------------------
 # Pairing check — runs once at boot
+#
+# GPIO9 (BOOT) is a boot-mode strapping pin, so it can't be held during
+# power-on to request pairing — that drops the chip into the ROM bootloader
+# instead of running this script.  Instead, watch it for a few seconds after
+# boot has already completed.
 # ---------------------------------------------------------------------------
 controller_mac = load_controller_mac()
 
-if boot_button.value() == 0 or controller_mac is None:
+force_pairing = False
+if controller_mac is not None:
+    print("Press BOOT within 3s to re-pair...")
+    window_start = time.ticks_ms()
+    led_state = False
+    while time.ticks_diff(time.ticks_ms(), window_start) < REPAIR_WINDOW_MS:
+        if boot_button.value() == 0:
+            force_pairing = True
+            break
+        led_state = not led_state
+        pair_led.value(led_state)
+        time.sleep_ms(100)
+    pair_led.value(0)
+
+if force_pairing or controller_mac is None:
     controller_mac = run_pairing_mode(pair_led)
     save_controller_mac(controller_mac)
     print("Pairing saved.  Rebooting into normal mode...")

@@ -3,8 +3,8 @@ Two-motor differential drive for a battle bot.
 
 Expects an H-bridge driver (e.g. DRV8833, L298N) wired to the ESP32:
 
-    Motor A: IN1=GPIO17, IN2=GPIO16, PWM=GPIO15
-    Motor B: IN1=GPIO19, IN2=GPIO18, PWM=GPIO13
+    Motor A: IN1=GPIO2, IN2=GPIO3, PWM=GPIO4
+    Motor B: IN1=GPIO5, IN2=GPIO6, PWM=GPIO7
 
 If your wiring differs, change the pin numbers in robot/main.py — the
 constants are defined there, not here, so you only edit one place.
