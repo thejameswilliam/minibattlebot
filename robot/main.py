@@ -81,6 +81,11 @@ COMMAND_TIMEOUT_MS = 200
 # already finished booting into this script — not while power is applied.
 REPAIR_WINDOW_MS = 3000
 
+# How often to print received-command debug output to the serial console.
+# Separate from the controller's 20 Hz send rate so debug prints don't flood
+# the terminal.
+DEBUG_PRINT_INTERVAL_MS = 200
+
 # ---------------------------------------------------------------------------
 # Config helpers — load/save the paired controller's MAC from flash
 # ---------------------------------------------------------------------------
@@ -210,6 +215,7 @@ ctrl_group.peerAdd(controller_mac, "CONTROLLER")
 
 # Track when the last command arrived to detect signal loss
 last_command_time = time.ticks_ms()
+last_debug_time = time.ticks_ms()
 
 
 def on_command_received(sender_mac, data):
@@ -220,7 +226,7 @@ def on_command_received(sender_mac, data):
       x: -100 to 100 — turning  (negative = left,    positive = right)
       y: -100 to 100 — throttle (negative = reverse,  positive = forward)
     """
-    global last_command_time
+    global last_command_time, last_debug_time
     last_command_time = time.ticks_ms()
 
     x = data.get("x", 0)
@@ -236,6 +242,11 @@ def on_command_received(sender_mac, data):
     motor_a.setSpeed(left_speed)
     motor_b.setSpeed(right_speed)
 
+    now = time.ticks_ms()
+    if time.ticks_diff(now, last_debug_time) >= DEBUG_PRINT_INTERVAL_MS:
+        print(f"recv x={x} y={y} -> left={left_speed} right={right_speed}")
+        last_debug_time = now
+
 
 # Replace the default (print-only) handler with our motor control handler
 conn.onDataReceived = on_command_received
@@ -248,10 +259,16 @@ print(f"Robot running.  Listening for controller: {controller_mac}")
 # ---------------------------------------------------------------------------
 # Main loop — watchdog feed, command timeout, and LED status
 # ---------------------------------------------------------------------------
+was_signal_lost = False
+
 while True:
     wdt.feed()
 
     signal_lost = time.ticks_diff(time.ticks_ms(), last_command_time) > COMMAND_TIMEOUT_MS
+
+    if signal_lost != was_signal_lost:
+        print("Signal lost — no commands received" if signal_lost else "Signal acquired")
+        was_signal_lost = signal_lost
 
     if signal_lost:
         stop_all_motors()

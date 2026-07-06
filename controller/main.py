@@ -90,6 +90,11 @@ REPAIR_WINDOW_MS = 3000
 # 50 ms = 20 packets per second — snappy response without flooding the radio.
 SEND_INTERVAL_MS = 50
 
+# How often to print joystick debug output to the serial console.
+# Separate from SEND_INTERVAL_MS so debug prints don't flood the terminal
+# at the full 20 Hz command rate.
+DEBUG_PRINT_INTERVAL_MS = 200
+
 # ---------------------------------------------------------------------------
 # Config helpers — load/save the paired robot's MAC from flash
 # ---------------------------------------------------------------------------
@@ -252,6 +257,7 @@ print(f"Controller running.  Paired with robot: {robot_mac}")
 # Main loop — read joystick and send commands at SEND_INTERVAL_MS
 # ---------------------------------------------------------------------------
 last_send_time = time.ticks_ms()
+last_debug_time = time.ticks_ms()
 
 while True:
     wdt.feed()
@@ -261,5 +267,13 @@ while True:
         x, y = read_joystick()
         robot_group.send({"x": x, "y": y})
         last_send_time = now
+
+        if time.ticks_diff(now, last_debug_time) >= DEBUG_PRINT_INTERVAL_MS:
+            print(
+                f"joystick raw: xp={joystick_xp.value()} xm={joystick_xm.value()} "
+                f"yp={joystick_yp.value()} ym={joystick_ym.value()}  "
+                f"-> x={x} y={y}"
+            )
+            last_debug_time = now
 
     time.sleep_ms(5)
